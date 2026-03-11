@@ -147,6 +147,66 @@ python generate.py -o starmap.db -p ./output
 
 ---
 
+### generate_ship_csv.py
+
+**Ship Data CSV Exporter** - Extracts ship attributes from EVE client data and exports to CSV format for analysis.
+
+**Usage**:
+```bash
+python generate_ship_csv.py [OPTIONS]
+```
+
+**Optional Arguments**:
+- `--output`, `-o` - Output CSV filename (default: `ship_data.csv`)
+- `--data-dir`, `-d` - Directory with extracted JSON data (default: `output`)
+- `--eve` - EVE client path (runs extraction if needed)
+
+**Examples**:
+```bash
+# Generate CSV from already-extracted data
+python generate_ship_csv.py
+
+# Extract data and generate CSV in one step
+python generate_ship_csv.py --eve "C:\CCP\EVE Frontier"
+
+# Custom output filename
+python generate_ship_csv.py --output my_ships.csv --data-dir output
+
+# Use custom data directory
+python generate_ship_csv.py --data-dir custom_output --output ships.csv
+```
+
+**CSV Output Columns**:
+- `Faction` - Ship faction (Keep, Synod, Exclave, etc.)
+- `ShipName` - Ship name
+- `Class` - Ship class (Shuttle, Corvette, Frigate, etc.)
+- `StructureHP` - Structure hit points
+- `Capacity_m3` - Cargo capacity (m³)
+- `FuelCapacity_units` - Fuel tank capacity
+- `Mass_kg` - Ship mass (kg)
+- `VolumeUnpackaged_m3` - Volume when assembled (m³)
+- `VolumePackaged_m3` - Volume when packaged (m³)
+- `InertiaModifier` - Inertia modifier (affects acceleration)
+- `ShieldRecharge_s` - Shield recharge time (seconds)
+- `Capacitor_GJ` - Capacitor capacity (GJ)
+- `SpecificHeat_C` - Specific heat capacity (overheating)
+- `Conductance_k` - Heat conductance
+- `MaxTargetRange_km` - Maximum targeting range (km)
+- `MaxLockedTargets` - Maximum number of targets
+- `SignatureRadius_m` - Signature radius (m)
+- `ScanResolution_mm` - Scan resolution (mm)
+- `MaxVelocity_mps` - Maximum velocity (m/s)
+- `WarpSpeed_c` - Warp speed multiplier (c)
+
+**Workflow**:
+1. First run `run.py` to extract EVE client data (or use `--eve` flag)
+2. Run `generate_ship_csv.py` to create CSV export
+3. Open in Excel, analyze with Python/pandas, or import to database
+
+**See also**: [SHIP_DATA_EXPORT.md](SHIP_DATA_EXPORT.md) for detailed guide
+
+---
+
 ### query_blueprints.py
 
 **Blueprint Query Tool** - Search and display manufacturing schemas/blueprints with material requirements and products.

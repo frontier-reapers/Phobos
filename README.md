@@ -79,6 +79,59 @@ The generated SQLite database contains the following tables:
 * **Moons**: Moon data orbiting planets with proper naming
 * **NpcStations**: NPC-owned stations in space
 
+## Ship Data CSV Export
+
+The `generate_ship_csv.py` script extracts detailed ship attributes from EVE Frontier client files and exports them to CSV format for analysis in Excel, Python, databases, or other tools.
+
+### Usage
+
+**Option 1: Generate from existing Phobos output**
+
+If you've already run the main extraction:
+
+    $ python generate_ship_csv.py
+
+This creates `ship_data.csv` with all ship attributes.
+
+**Option 2: Extract and generate in one step**
+
+    $ python generate_ship_csv.py --eve "C:\CCP\EVE Frontier"
+
+This will automatically run the data extraction first if needed, then generate the CSV.
+
+**Custom output location:**
+
+    $ python generate_ship_csv.py --output my_ships.csv
+
+### CSV Output
+
+The generated CSV contains 20 attributes for each ship:
+
+- **Identity**: Faction, Ship Name, Class (Shuttle, Corvette, Frigate, etc.)
+- **Structure**: HP, Mass, Volume (packaged/unpacked), Cargo Capacity
+- **Performance**: Max Velocity, Warp Speed, Inertia Modifier
+- **Defense**: Shield Recharge Time, Capacitor, Heat Capacity
+- **Targeting**: Max Range, Max Targets, Signature Radius, Scan Resolution
+- **Resources**: Fuel Capacity
+
+**Example output:**
+```
+Faction,ShipName,Class,StructureHP,Capacity_m3,FuelCapacity_units,Mass_kg,...
+Keep,Wend,Shuttle,750.0,520.0,200.0,6800000.0,...
+Exclave,USV,Frigate,2160.0,3120.0,2420.0,30266600.0,...
+Synod,Carom,Corvette,1300.0,300.0,3000.0,7200000.0,...
+```
+
+### Requirements
+
+Requires extracted JSON data from Phobos. If not already extracted, run:
+
+    $ python run.py --eve "C:\CCP\EVE Frontier" --json output --translate=multi
+
+For detailed documentation, troubleshooting, and integration examples, see [SHIP_DATA_EXPORT.md](docs/SHIP_DATA_EXPORT.md).
+
+---
+
 ## Other Tools
 
 ### Image Extractor

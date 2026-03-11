@@ -35,6 +35,21 @@ def _parse_float(value):
             return None
     return None
 
+def _parse_int(value):
+    """Parse an integer value from string or number."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
 def _parse_bool(value):
     """Parse a boolean value from string."""
     if value is None:
@@ -46,15 +61,6 @@ def _parse_bool(value):
     if isinstance(value, str):
         return 1 if value.lower() in ('true', '1', 'yes') else 0
     return None
-
-def extract_fsd_dict_data(fsd_entry: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Extract data from FSD_DICT structure into flat dictionary."""
-    result = {}
-    for item in fsd_entry:
-        if isinstance(item, dict):
-            for key, value in item.items():
-                result[key] = value
-    return result
 
 
 def create_database_schema(conn: sqlite3.Connection) -> None:
@@ -513,51 +519,50 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     conn.commit()
     print(f"Inserted {constellation_count} constellations")
     
-    # Load systems
-    print("Loading systems...")
-    systems_path = phobos_path / 'fsd_binary_schema' / 'systems.json'
-    
-    # Also load solarsystemcontent.json for star statistics
-    systems_content_path = phobos_path / 'fsd_binary_schema' / 'solarsystemcontent.json'
+    # Load star statistics first (before inserting systems)
+    print("Loading star statistics...")
     star_statistics = {}
-    
+    systems_content_path = phobos_path / 'fsd_binary_schema' / 'solarsystemcontent.json'
     if systems_content_path.exists():
-        print("Loading star statistics from solarsystemcontent.json...")
         with open(systems_content_path, 'r', encoding='utf-8') as f:
             systems_content_data = json.load(f)
         
         if 'Type: FSD Multi Index' in systems_content_data:
-            content_data = systems_content_data['Type: FSD Multi Index']
+            systems_data_for_stars = systems_content_data['Type: FSD Multi Index']
         else:
-            content_data = systems_content_data
+            systems_data_for_stars = systems_content_data
         
-        # Extract star statistics for each system
-        for system_dict in content_data:
-            for system_id_str, system_entries in system_dict.items():
-                if isinstance(system_entries, list):
-                    try:
-                        system_id = int(system_id_str)
-                        system_data = extract_fsd_dict_data(system_entries)
-                        star_key = f'{system_id}.star'
-                        
-                        if star_key in system_data and isinstance(system_data[star_key], list):
-                            star_data = extract_fsd_dict_data(system_data[star_key])
-                            stats_data = star_data.get('star.statistics', [])
-                            
-                            # Parse statistics list
-                            stats = {}
-                            if isinstance(stats_data, list):
-                                for stat_item in stats_data:
-                                    if isinstance(stat_item, dict):
-                                        for stat_key, stat_value in stat_item.items():
-                                            field_name = stat_key.replace('statistics.', '')
-                                            stats[field_name] = stat_value
-                            
-                            star_statistics[system_id] = stats
-                    except ValueError:
-                        continue
+        for system_dict in systems_data_for_stars:
+            for system_id_str, system_data in system_dict.items():
+                try:
+                    system_id = int(system_id_str)
+                except ValueError:
+                    continue
+                
+                # Only process dict entries (skip string entries)
+                if not isinstance(system_data, dict):
+                    continue
+                
+                # Extract star statistics for this system
+                star_data = system_data.get('star', {})
+                if isinstance(star_data, dict):
+                    statistics = star_data.get('statistics', {})
+                    if isinstance(statistics, dict) and statistics:
+                        star_statistics[system_id] = {
+                            'age': statistics.get('age'),
+                            'mass': statistics.get('mass'),
+                            'metallicity': statistics.get('metallicity'),
+                            'radius': statistics.get('radius'),
+                            'spectralClass': statistics.get('spectralClass'),
+                            'temperature': statistics.get('temperature'),
+                            'luminosity': statistics.get('luminosity')
+                        }
         
         print(f"Loaded star statistics for {len(star_statistics)} systems")
+    
+    # Load systems
+    print("Loading systems...")
+    systems_path = phobos_path / 'fsd_binary_schema' / 'systems.json'
     
     # Load systems from systems.json
     if systems_path.exists():
@@ -835,9 +840,59 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     else:
         print(f"Warning: Celestials file not found at {celestials_path}")
     
-    # Load NPC stations from SQLite miner output
+    # Load NPC stations: merge data from solarsystemcontent.json (names, lagrangePoint) 
+    # and SQLite data (coordinates, properties)
+    station_names_and_lp = {}  # {stationId: (name, lagrangePoint, planetId)}
+    
+    if systems_content_path.exists():
+        print("Loading NPC station names and lagrange points from solarsystemcontent.json...")
+        with open(systems_content_path, 'r', encoding='utf-8') as f:
+            systems_content_data = json.load(f)
+        
+        if 'Type: FSD Multi Index' in systems_content_data:
+            systems_data = systems_content_data['Type: FSD Multi Index']
+        else:
+            systems_data = systems_content_data
+        
+        for system_dict in systems_data:
+            for system_id_str, system_data in system_dict.items():
+                try:
+                    system_id = int(system_id_str)
+                except ValueError:
+                    continue
+                
+                if not isinstance(system_data, dict):
+                    continue
+                
+                # Get planets data
+                planets_data = system_data.get('planets', {})
+                if isinstance(planets_data, dict):
+                    for planet_id_str, planet_data in planets_data.items():
+                        try:
+                            planet_id = int(planet_id_str)
+                        except ValueError:
+                            continue
+                        
+                        # Get NPC stations for this planet
+                        npc_stations = planet_data.get('npcStations', {})
+                        if isinstance(npc_stations, dict):
+                            for station_id_str, station_data in npc_stations.items():
+                                try:
+                                    station_id = int(station_id_str)
+                                except ValueError:
+                                    continue
+                                
+                                # Store station name and lagrange point for merging
+                                station_name = station_data.get('stationName', f'Station {station_id}')
+                                lagrange_point = _parse_int(station_data.get('lagrangePoint'))
+                                station_names_and_lp[station_id] = (station_name, lagrange_point, planet_id)
+        
+        print(f"Loaded names for {len(station_names_and_lp)} NPC stations")
+    
+    # Load station coordinates and properties from SQLite data
     stations_path = phobos_path / 'sqlite' / 'app__bin64_staticdata_mapObjects_npcStations.json'
     if stations_path.exists():
+        print("Loading NPC station coordinates and properties from SQLite data...")
         with open(stations_path, 'r', encoding='utf-8') as f:
             stations_data = json.load(f)
         
@@ -859,31 +914,36 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
             reprocessing_efficiency = _parse_float(station.get('reprocessingEfficiency'))
             reprocessing_take = _parse_float(station.get('reprocessingStationsTake'))
             
-            # Station names come from localization
-            name = localization_names.get(station_id, f'Station {station_id}')
+            # Get name and lagrange point from solarsystemcontent, fallback to localization/defaults
+            if station_id in station_names_and_lp:
+                name, lagrange_point, planet_id = station_names_and_lp[station_id]
+            else:
+                name = localization_names.get(station_id, f'Station {station_id}')
+                lagrange_point = None
+                planet_id = orbit_id  # Use orbitID as planetId fallback
             
             cursor.execute('''
                 INSERT OR IGNORE INTO NpcStations (
                     stationId, name, solarSystemId, planetId, typeId, ownerId,
-                    centerX, centerY, centerZ, operationId,
+                    centerX, centerY, centerZ, lagrangePoint, orbitId, operationId,
                     isConquerable, reprocessingEfficiency, reprocessingStationsTake
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (station_id, name, system_id, orbit_id, type_id, owner_id,
-                  x, y, z, operation_id, is_conquerable,
-                  reprocessing_efficiency, reprocessing_take))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (station_id, name, system_id, planet_id, type_id, owner_id,
+                  x, y, z, lagrange_point, orbit_id, operation_id,
+                  is_conquerable, reprocessing_efficiency, reprocessing_take))
             station_count += 1
+        
+        print(f"Inserted {station_count} NPC stations")
     else:
-        print(f"Warning: NPC stations file not found at {stations_path}")
+        print(f"Warning: NPC stations SQLite file not found at {stations_path}")
     
     conn.commit()
     print(f"Inserted {planet_count} planets, {moon_count} moons, and {station_count} NPC stations")
     
-    # Extract Lagrange Points
+    # Extract Lagrange Points (reuse systems_content_data loaded earlier)
     print("Extracting Lagrange Points...")
     lpoint_count = 0
     
-    # Load solarsystemcontent.json which contains Lagrange point data
-    systems_content_path = phobos_path / 'fsd_binary_schema' / 'solarsystemcontent.json'
     if systems_content_path.exists():
         with open(systems_content_path, 'r', encoding='utf-8') as f:
             systems_content_data = json.load(f)
