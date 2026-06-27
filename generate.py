@@ -63,6 +63,27 @@ def _parse_bool(value):
     return None
 
 
+def _resolve_entity_name(direct_name, name_id, entity_id, localization_names, default_prefix):
+    """Resolve entity name from direct name field, falling back to nameID localization."""
+    if isinstance(direct_name, str):
+        direct_name = direct_name.strip()
+        if direct_name:
+            return direct_name
+
+    if isinstance(name_id, str):
+        try:
+            name_id = int(name_id)
+        except ValueError:
+            name_id = None
+
+    if name_id and name_id in localization_names:
+        return localization_names[name_id]
+    elif entity_id in localization_names:
+        return localization_names[entity_id]
+    else:
+        return f'{default_prefix} {entity_id}'
+
+
 def create_database_schema(conn: sqlite3.Connection) -> None:
     """Create the database schema."""
     print("Creating database schema...")
@@ -437,20 +458,14 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                 # If center coordinates are invalid or missing, keep defaults (None) so they are stored as NULL.
                 pass
         
-        # Convert nameID to int if it's a string
-        if isinstance(name_id, str):
-            try:
-                name_id = int(name_id)
-            except ValueError:
-                name_id = None
-        
-        # Use nameID for localization lookup, fallback to region_id, then generic name
-        if name_id and name_id in localization_names:
-            region_name = localization_names[name_id]
-        elif region_id in localization_names:
-            region_name = localization_names[region_id]
-        else:
-            region_name = f'Region {region_id}'
+        # Resolve region name: prefer direct `name` field, then nameID localization fallback
+        region_name = _resolve_entity_name(
+            region_data.get('name'),
+            region_data.get('nameID'),
+            region_id,
+            localization_names,
+            'Region'
+        )
             
         cursor.execute('''
             INSERT INTO Regions (regionId, name, centerX, centerY, centerZ) 
@@ -495,20 +510,15 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                 region_id = int(region_id)
             except ValueError:
                 region_id = None
-        
-        if isinstance(name_id, str):
-            try:
-                name_id = int(name_id)
-            except ValueError:
-                name_id = None
-        
-        # Use nameID for localization lookup, fallback to constellation_id, then generic name
-        if name_id and name_id in localization_names:
-            constellation_name = localization_names[name_id]
-        elif constellation_id in localization_names:
-            constellation_name = localization_names[constellation_id]
-        else:
-            constellation_name = f'Constellation {constellation_id}'
+
+        # Resolve constellation name: prefer direct `name` field, then nameID localization fallback
+        constellation_name = _resolve_entity_name(
+            constellation_data.get('name'),
+            constellation_data.get('nameID'),
+            constellation_id,
+            localization_names,
+            'Constellation'
+        )
         
         cursor.execute('''
             INSERT INTO Constellations (constellationId, name, regionId, centerX, centerY, centerZ) 
@@ -625,19 +635,14 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                     except ValueError:
                         region_id = None
                 
-                if isinstance(name_id, str):
-                    try:
-                        name_id = int(name_id)
-                    except ValueError:
-                        name_id = None
-                
-                # Use nameID for localization lookup, fallback to system_id, then generic name
-                if name_id and name_id in localization_names:
-                    system_name = localization_names[name_id]
-                elif system_id in localization_names:
-                    system_name = localization_names[system_id]
-                else:
-                    system_name = f'System {system_id}'
+                # Resolve system name: prefer direct `name` field, then nameID localization fallback
+                system_name = _resolve_entity_name(
+                    system_data.get('name'),
+                    system_data.get('nameID'),
+                    system_id,
+                    localization_names,
+                    'System'
+                )
                 
                 # Get star statistics
                 star_stats = star_statistics.get(system_id, {})
@@ -724,20 +729,14 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                             if len(vector_data) >= 3:
                                 x, y, z = vector_data[0], vector_data[1], vector_data[2]
                         
-                        # Convert nameID to int if it's a string
-                        if isinstance(name_id, str):
-                            try:
-                                name_id = int(name_id)
-                            except ValueError:
-                                name_id = None
-                        
-                        # Use nameID for localization lookup, fallback to system_id, then generic name
-                        if name_id and name_id in localization_names:
-                            system_name = localization_names[name_id]
-                        elif system_id in localization_names:
-                            system_name = localization_names[system_id]
-                        else:
-                            system_name = f'System {system_id}'
+                        # Resolve system name: prefer direct `name` field, then nameID localization fallback
+                        system_name = _resolve_entity_name(
+                            system_data.get(f'{system_id}.name'),
+                            system_data.get(f'{system_id}.nameID'),
+                            system_id,
+                            localization_names,
+                            'System'
+                        )
                         
                         # Get star statistics
                         star_stats = star_statistics.get(system_id, {})
@@ -759,7 +758,13 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                     elif isinstance(system_entries, str):
                         # String entries might just be system IDs, we still need the data
                         # For now, insert with minimal info and get constellation/region from jumps data
-                        system_name = localization_names.get(system_id, f'System {system_id}')
+                        system_name = _resolve_entity_name(
+                            None,
+                            None,
+                            system_id,
+                            localization_names,
+                            'System'
+                        )
                         
                         # Get star statistics
                         star_stats = star_statistics.get(system_id, {})
