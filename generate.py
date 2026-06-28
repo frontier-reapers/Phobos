@@ -104,6 +104,10 @@ def create_database_schema(conn: sqlite3.Connection) -> None:
     cursor.execute('DROP TABLE IF EXISTS NpcStations')
     cursor.execute('DROP TABLE IF EXISTS LagrangePoints')
     cursor.execute('DROP TABLE IF EXISTS Types')
+    cursor.execute('DROP TABLE IF EXISTS Ecosystems')
+    cursor.execute('DROP TABLE IF EXISTS EcosystemPatterns')
+    cursor.execute('DROP TABLE IF EXISTS Dungeons')
+    cursor.execute('DROP TABLE IF EXISTS LandscapeInstances')
     
     # Regions table
     cursor.execute('''
@@ -284,8 +288,74 @@ def create_database_schema(conn: sqlite3.Connection) -> None:
         )
     ''')
     
+    # Ecosystems table
+    cursor.execute('''
+        CREATE TABLE Ecosystems (
+            ecosystemId INTEGER PRIMARY KEY,
+            name TEXT,
+            description TEXT,
+            entryDungeonId INTEGER,
+            minBrokenWorldPatterns INTEGER,
+            maxBrokenWorldPatterns INTEGER,
+            minNaturalWorldPatterns INTEGER,
+            maxNaturalWorldPatterns INTEGER
+        )
+    ''')
+    
+    # EcosystemPatterns table
+    cursor.execute('''
+        CREATE TABLE EcosystemPatterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ecosystemId INTEGER,
+            patternType TEXT,
+            dungeonId INTEGER,
+            minOccurrences INTEGER,
+            maxOccurrences INTEGER,
+            weight REAL,
+            FOREIGN KEY (ecosystemId) REFERENCES Ecosystems (ecosystemId)
+        )
+    ''')
+    
+    # Dungeons table
+    cursor.execute('''
+        CREATE TABLE Dungeons (
+            dungeonId INTEGER PRIMARY KEY,
+            dungeonName TEXT
+        )
+    ''')
+    
+    # LandscapeInstances table
+    cursor.execute('''
+        CREATE TABLE LandscapeInstances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            solarSystemId INTEGER,
+            category TEXT,
+            itemId INTEGER,
+            clusterId INTEGER,
+            siteId INTEGER,
+            ecosystemId INTEGER,
+            innerPlanetId INTEGER,
+            planetId INTEGER,
+            lagrangePointId INTEGER,
+            innerRadius REAL,
+            outerRadius REAL,
+            minorRadius REAL,
+            minorRadiusVertical REAL,
+            weight REAL,
+            posX REAL,
+            posY REAL,
+            posZ REAL,
+            tags TEXT,
+            FOREIGN KEY (solarSystemId) REFERENCES SolarSystems (solarSystemId),
+            FOREIGN KEY (innerPlanetId) REFERENCES Planets (planetId),
+            FOREIGN KEY (planetId) REFERENCES Planets (planetId)
+        )
+    ''')
+    
     # Create indexes for common type lookups
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_types_name ON Types(typeName)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_landscape_system ON LandscapeInstances(solarSystemId)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_landscape_eco ON LandscapeInstances(ecosystemId)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_types_groupId ON Types(groupId)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_types_marketGroupId ON Types(marketGroupId)')
     
@@ -389,6 +459,185 @@ def load_types_data(conn: sqlite3.Connection, phobos_path: Path) -> int:
         print(f"Filtered {filtered} types (unpublished, no mass, or excluded groups)")
     
     return count
+
+
+def load_ecosystems_data(conn: sqlite3.Connection, phobos_path: Path) -> int:
+    """Load ecosystem data from fsd_built/ecosystem.json into the database."""
+    print("Loading ecosystems data...")
+    
+    ecosystems_file = phobos_path / 'fsd_built' / 'ecosystem.json'
+    if not ecosystems_file.exists():
+        print("Warning: ecosystem.json not found, skipping ecosystems data")
+        return 0
+    
+    cursor = conn.cursor()
+    
+    with open(ecosystems_file, 'r', encoding='utf-8') as f:
+        ecosystems_data = json.load(f)
+    
+    ecosystem_count = 0
+    pattern_count = 0
+    referenced_dungeon_ids = set()
+    
+    for ecosystem_id_str, eco_data in ecosystems_data.items():
+        ecosystem_id = int(ecosystem_id_str)
+        entry_pattern = eco_data.get('entryPattern', {})
+        entry_dungeon_id = entry_pattern.get('dungeonID')
+        
+        cursor.execute('''
+            INSERT INTO Ecosystems (
+                ecosystemId, name, description, entryDungeonId,
+                minBrokenWorldPatterns, maxBrokenWorldPatterns,
+                minNaturalWorldPatterns, maxNaturalWorldPatterns
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            ecosystem_id,
+            eco_data.get('name'),
+            eco_data.get('description'),
+            entry_dungeon_id,
+            eco_data.get('minBrokenWorldPatterns'),
+            eco_data.get('maxBrokenWorldPatterns'),
+            eco_data.get('minNaturalWorldPatterns'),
+            eco_data.get('maxNaturalWorldPatterns')
+        ))
+        ecosystem_count += 1
+        
+        for pattern_type, patterns in [('broken_world', eco_data.get('brokenWorldPatterns', [])),
+                                        ('natural_world', eco_data.get('naturalWorldPatterns', []))]:
+            for pattern in patterns:
+                dungeon_id = pattern.get('dungeonID')
+                if dungeon_id is not None:
+                    referenced_dungeon_ids.add(dungeon_id)
+                
+                cursor.execute('''
+                    INSERT INTO EcosystemPatterns (
+                        ecosystemId, patternType, dungeonId, minOccurrences, maxOccurrences, weight
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    ecosystem_id,
+                    pattern_type,
+                    dungeon_id,
+                    pattern.get('minOccurrences'),
+                    pattern.get('maxOccurrences'),
+                    _parse_float(pattern.get('weight'))
+                ))
+                pattern_count += 1
+    
+    conn.commit()
+    print(f"Inserted {ecosystem_count} ecosystems")
+    print(f"Inserted {pattern_count} ecosystem patterns")
+    print(f"Referenced {len(referenced_dungeon_ids)} unique dungeon IDs")
+    
+    return referenced_dungeon_ids
+
+
+def load_dungeon_names(conn: sqlite3.Connection, phobos_path: Path, referenced_dungeon_ids: set) -> int:
+    """Load dungeon names from fsd_built/dungeons.json for the referenced subset."""
+    print("Loading dungeon names...")
+    
+    if not referenced_dungeon_ids:
+        print("No dungeons referenced, skipping dungeon names")
+        return 0
+    
+    dungeons_file = phobos_path / 'fsd_built' / 'dungeons.json'
+    if not dungeons_file.exists():
+        print("Warning: dungeons.json not found, skipping dungeon data")
+        return 0
+    
+    cursor = conn.cursor()
+    
+    with open(dungeons_file, 'r', encoding='utf-8') as f:
+        dungeons_data = json.load(f)
+    
+    count = 0
+    for dungeon_id_str, dungeon_data in dungeons_data.items():
+        dungeon_id = int(dungeon_id_str)
+        if dungeon_id not in referenced_dungeon_ids:
+            continue
+        
+        name = dungeon_data.get('dungeonName_en-us', f'Dungeon {dungeon_id}')
+        
+        cursor.execute('''
+            INSERT INTO Dungeons (dungeonId, dungeonName) VALUES (?, ?)
+        ''', (dungeon_id, name))
+        count += 1
+    
+    conn.commit()
+    print(f"Inserted {count} dungeon names")
+    return count
+
+
+def load_landscape_instances(conn: sqlite3.Connection, phobos_path: Path) -> int:
+    """Load landscape instances from fsd_built/landscape.json into the database."""
+    print("Loading landscape instances...")
+    
+    landscape_file = phobos_path / 'fsd_built' / 'landscape.json'
+    if not landscape_file.exists():
+        print("Warning: landscape.json not found, skipping landscape data")
+        return 0
+    
+    cursor = conn.cursor()
+    
+    with open(landscape_file, 'r', encoding='utf-8') as f:
+        landscape_data = json.load(f)
+    
+    rows = []
+    for system_id_str, system_data in landscape_data.items():
+        system_id = int(system_id_str)
+        
+        for category in ['asteroidBelts', 'trojans']:
+            items = system_data.get(category, {})
+            if not isinstance(items, dict):
+                continue
+            
+            for item_id_str, item_data in items.items():
+                item_id = int(item_id_str)
+                tags = item_data.get('tags', [])
+                tags_json = json.dumps(tags)
+                
+                inner_planet_id = item_data.get('innerPlanetID')
+                planet_id = item_data.get('planetID')
+                lagrange_point_id = item_data.get('lagrangePointID')
+                inner_radius = _parse_float(item_data.get('innerRadius'))
+                outer_radius = _parse_float(item_data.get('outerRadius'))
+                minor_radius = _parse_float(item_data.get('minorRadius'))
+                minor_radius_vertical = _parse_float(item_data.get('minorRadiusVertical'))
+                weight = _parse_float(item_data.get('weight'))
+                
+                clusters = item_data.get('clusters', {})
+                sites = item_data.get('sites', {})
+                
+                for cluster_id_str, cluster_data in clusters.items():
+                    cluster_id = int(cluster_id_str)
+                    for site_id in cluster_data.get('siteIDs', []):
+                        site_id_int = int(site_id)
+                        site_data = sites.get(str(site_id_int), {})
+                        position = site_data.get('position', {})
+                        pos_x = _parse_float(position.get('x'))
+                        pos_y = _parse_float(position.get('y'))
+                        pos_z = _parse_float(position.get('z'))
+                        ecosystem_id = site_data.get('ecosystemID')
+                        
+                        rows.append((
+                            system_id, category, item_id, cluster_id, site_id_int,
+                            ecosystem_id, inner_planet_id, planet_id, lagrange_point_id,
+                            inner_radius, outer_radius, minor_radius, minor_radius_vertical,
+                            weight, pos_x, pos_y, pos_z, tags_json
+                        ))
+    
+    if rows:
+        cursor.executemany('''
+            INSERT INTO LandscapeInstances (
+                solarSystemId, category, itemId, clusterId, siteId,
+                ecosystemId, innerPlanetId, planetId, lagrangePointId,
+                innerRadius, outerRadius, minorRadius, minorRadiusVertical,
+                weight, posX, posY, posZ, tags
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', rows)
+        conn.commit()
+    
+    print(f"Inserted {len(rows)} landscape instances")
+    return len(rows)
 
 
 def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
@@ -1048,6 +1297,11 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     # Load types data
     load_types_data(conn, phobos_path)
     
+    # Load ecosystem and landscape data
+    referenced_dungeon_ids = load_ecosystems_data(conn, phobos_path)
+    load_dungeon_names(conn, phobos_path, referenced_dungeon_ids)
+    load_landscape_instances(conn, phobos_path)
+    
     # Vacuum database
     conn.execute('VACUUM')
     conn.commit()
@@ -1071,6 +1325,14 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     lpoints_count = cursor.fetchone()[0]
     cursor.execute('SELECT COUNT(*) FROM Types')  
     types_count = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM Ecosystems')
+    ecosystems_count = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM EcosystemPatterns')  
+    patterns_count = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM Dungeons')  
+    dungeons_count = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM LandscapeInstances')  
+    landscape_count = cursor.fetchone()[0]
     
     print(f"Successfully created database: {db_path}")
     print("Database contains:")
@@ -1083,6 +1345,10 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     print(f"  - {stations_count:,} NPC stations")
     print(f"  - {lpoints_count:,} Lagrange Points")
     print(f"  - {types_count:,} types")
+    print(f"  - {ecosystems_count:,} ecosystems")
+    print(f"  - {patterns_count:,} ecosystem patterns")
+    print(f"  - {dungeons_count:,} dungeons")
+    print(f"  - {landscape_count:,} landscape instances")
     
     conn.close()
 
