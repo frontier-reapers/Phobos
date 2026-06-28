@@ -1374,35 +1374,24 @@ def run_simple_query(db_path: str, query: str):
         print(f"Query error: {e}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Process Phobos EVE data into SQLite database')
-    parser.add_argument('--output', '-o', 
-                       default='eve_universe.db',
-                       help='Output SQLite database path (default: eve_universe.db)')
-    parser.add_argument('--phobos-output', '-p',
-                       default='./output',
-                       help='Path to Phobos output directory (default: ./output)')
-    parser.add_argument('--query', '-q',
-                       help='Run a simple query on the database after creation')
-    
-    args = parser.parse_args()
-    
+def main(output='eve_universe.db', phobos_output='./output', query=None):
+    """Main entry point."""
     # Verify Python version
     if sys.version_info < (3, 7):
         print("Error: This script requires Python 3.7 or higher")
         sys.exit(1)
     
     # Verify phobos output directory exists
-    if not os.path.exists(args.phobos_output):
-        print(f"Error: Phobos output directory does not exist: {args.phobos_output}")
+    if not os.path.exists(phobos_output):
+        print(f"Error: Phobos output directory does not exist: {phobos_output}")
         sys.exit(1)
     
     try:
-        process_eve_data(args.phobos_output, args.output)
+        process_eve_data(phobos_output, output)
         
         # Run query if specified
-        if args.query:
-            run_simple_query(args.output, args.query)
+        if query:
+            run_simple_query(output, query)
         
         print("\nProcessing complete!")
         print("\nYou can now query the database with tools like sqlite3 or DB Browser for SQLite.")
@@ -1419,4 +1408,15 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Process Phobos EVE data into SQLite database')
+    parser.add_argument('--output', '-o',
+                       default='eve_universe.db',
+                       help='Output SQLite database path (default: eve_universe.db)')
+    parser.add_argument('--phobos-output', '-p',
+                       default='./output',
+                       help='Path to Phobos output directory (default: ./output)')
+    parser.add_argument('--query', '-q',
+                       help='Run a simple query on the database after creation')
+    
+    args = parser.parse_args()
+    main(args.output, args.phobos_output, args.query)

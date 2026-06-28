@@ -239,6 +239,8 @@ def generate_ship_csv(output_dir='output', output_file='ship_data.csv'):
     Args:
         output_dir: Directory containing extracted JSON data
         output_file: Output CSV filename
+    Returns:
+        True on success, False on failure
     """
     output_path = Path(output_dir)
     
@@ -351,7 +353,7 @@ def generate_ship_csv(output_dir='output', output_file='ship_data.csv'):
             writer.writeheader()
             writer.writerows(ships)
         
-        print(f"\n✓ Ship data written to: {csv_path}")
+        print(f"\n[OK] Ship data written to: {csv_path}")
         print(f"  Total ships: {len(ships)}")
         
         # Show sample
@@ -361,25 +363,24 @@ def generate_ship_csv(output_dir='output', output_file='ship_data.csv'):
         
         return True
     else:
-        print("\n⚠ No ships found in data")
+        print("\n[WARN] No ships found in data")
         return False
 
 
-def main():
-    """Main entry point."""
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Generate CSV file with EVE ship data',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   Generate ship_data.csv from default output directory:
-    python generate_ship_csv.py
+    python -m scripts.generate_ship_csv
     
   Specify custom output file:
-    python generate_ship_csv.py --output my_ships.csv
+    python -m scripts.generate_ship_csv --output my_ships.csv
     
   Use custom data directory:
-    python generate_ship_csv.py --data-dir custom_output
+    python -m scripts.generate_ship_csv --data-dir custom_output
         """
     )
     
@@ -411,7 +412,7 @@ Examples:
             print("\nRunning data extraction first...")
             import subprocess
             result = subprocess.run([
-                sys.executable, 'run.py',
+                sys.executable, '-m', 'run',
                 '--eve', args.eve,
                 '--json', args.data_dir,
                 '--translate=multi'
@@ -419,18 +420,14 @@ Examples:
             
             if result.returncode != 0:
                 print("Error: Data extraction failed")
-                return 1
+                sys.exit(1)
         else:
             print("\nPlease either:")
             print("  1. Run data extraction first:")
-            print('     python run.py --eve "C:\\CCP\\EVE Online" --json output --translate=multi')
+            print('     python -m run --eve "C:\\CCP\\EVE Online" --json output --translate=multi')
             print("  2. Or provide --eve argument to this script")
-            return 1
+            sys.exit(1)
     
     # Generate CSV
     success = generate_ship_csv(args.data_dir, args.output)
-    return 0 if success else 1
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(0 if success else 1)

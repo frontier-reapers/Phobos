@@ -16,17 +16,34 @@ It doesn't mean that you should not use these miners. Generally speaking, if you
 * Python 3.12
 * 64-bit python built for Windows is needed to access data in FSD binary format
 
+### Unified Build Pipeline
+
+To run the full extraction and generation pipeline in one step, use the unified build command:
+
+    $ python -m scripts.build_all --eve="C:\CCP\EVE Frontier" --output ./out
+
+This will extract raw data into `./out/raw/` and then run all downstream generators (universe database, ship CSV, item icons, and landscapes) into `./out`.
+
 ### Arguments:
-
 * `--eve`: Required. Path to EVE client folder, e.g. `C:\CCP\EVE Online`.
-* `--json`: Required. Output folder for JSON files.
+* `--output` or `-o`: Required. Output directory for all generated artifacts.
 * `--server`: Optional. Server to pull data from. Defaults to `stillness`.
-* `--translate`: Optional. Specifies language to which strings will be translated. You can choose either individual languages (run script with `--help` argument for a list) or 'multi' option. For individual language, translation will be done in-place (replaces original text with localized text), for multi-language translation, original text is not modified, but new text fields are added, named using `<field name>_<language code>` convention (e.g. `typeName_en-us`). Multi-language translation mode is default.
-* `--list`: Optional. Specifies list of comma-separated 'containers' to extract. It uses names the script prints to stdout. For list of all available names you can launch script without specifying this option, as by default it extracts everything it can find.
+* `--translate`: Optional. Specifies language to which strings will be translated (default: `multi`).
+* `--list`: Optional. Comma-separated list of container names to extract.
 
-### Example
+### Upstream Extraction Only
+
+If you only need the raw JSON extraction (without downstream generators), you can still run the upstream miner directly:
 
     $ python run.py --eve=E:\eve\client\ --json=~\Desktop\phobos_tq_en-us --list="evetypes, marketgroups, metadata"
+
+Arguments for `run.py`:
+
+* `--eve`: Required. Path to EVE client folder.
+* `--json`: Required. Output folder for JSON files.
+* `--server`: Optional. Server to pull data from. Defaults to `stillness`.
+* `--translate`: Optional. Language translation mode (default: `multi`).
+* `--list`: Optional. Comma-separated container names to extract.
 
 ## EVE Universe Database Generator
 
@@ -41,11 +58,13 @@ The `generate.py` script extracts EVE universe data from Phobos output and creat
 
 First, run Phobos to extract the raw EVE client data:
 
-    $ python run.py --eve="C:\CCP\EVE Frontier" --json=output --translate=multi
+    $ python -m run --eve="C:\CCP\EVE Frontier" --json=output --translate=multi
 
 Then use the generated output to create the universe database:
 
-    $ python generate.py --output eve_universe.db --phobos-output ./output
+    $ python -m scripts.generate --output eve_universe.db --phobos-output ./output
+
+> **Note:** The `python -m scripts.<name>` invocation pattern is the supported way to run relocated generators. It ensures the project root is on `sys.path`, allowing clean absolute imports. You can also use the unified build pipeline instead: `python -m scripts.build_all ...`
 
 ### Arguments for generate.py
 
@@ -57,15 +76,15 @@ Then use the generated output to create the universe database:
 
 Create a database with default settings:
 
-    $ python generate.py
+    $ python -m scripts.generate
 
 Create a database with custom paths:
 
-    $ python generate.py --output frontier_universe.db --phobos-output ./phobos_data
+    $ python -m scripts.generate --output frontier_universe.db --phobos-output ./phobos_data
 
 Create database and run a query:
 
-    $ python generate.py --query "SELECT COUNT(*) FROM SolarSystems"
+    $ python -m scripts.generate --query "SELECT COUNT(*) FROM SolarSystems"
 
 ### Database Schema
 
@@ -89,19 +108,19 @@ The `generate_ship_csv.py` script extracts detailed ship attributes from EVE Fro
 
 If you've already run the main extraction:
 
-    $ python generate_ship_csv.py
+    $ python -m scripts.generate_ship_csv
 
 This creates `ship_data.csv` with all ship attributes.
 
 **Option 2: Extract and generate in one step**
 
-    $ python generate_ship_csv.py --eve "C:\CCP\EVE Frontier"
+    $ python -m scripts.generate_ship_csv --eve "C:\CCP\EVE Frontier"
 
 This will automatically run the data extraction first if needed, then generate the CSV.
 
 **Custom output location:**
 
-    $ python generate_ship_csv.py --output my_ships.csv
+    $ python -m scripts.generate_ship_csv --output my_ships.csv
 
 ### CSV Output
 
@@ -126,7 +145,7 @@ Synod,Carom,Corvette,1300.0,300.0,3000.0,7200000.0,...
 
 Requires extracted JSON data from Phobos. If not already extracted, run:
 
-    $ python run.py --eve "C:\CCP\EVE Frontier" --json output --translate=multi
+    $ python -m run --eve "C:\CCP\EVE Frontier" --json output --translate=multi
 
 For detailed documentation, troubleshooting, and integration examples, see [SHIP_DATA_EXPORT.md](docs/SHIP_DATA_EXPORT.md).
 
@@ -135,12 +154,27 @@ For detailed documentation, troubleshooting, and integration examples, see [SHIP
 ## Other Tools
 
 ### Image Extractor
-`generate_image_zip.py` extracts item icons from the EVE client resource files and packages them into a ZIP archive.
+`scripts/generate_image_zip.py` extracts item icons from the EVE client resource files and packages them into a ZIP archive.
 See [SCRIPTS_REFERENCE.md](docs/SCRIPTS_REFERENCE.md#generate_image_zippy) for usage.
 
 ### Output Cleaner
 `tools/tidy_outputs.py` reduces the size of Phobos JSON output by removing redundant or constant keys.
 See [SCRIPTS_REFERENCE.md](docs/SCRIPTS_REFERENCE.md#toolstidy_outputspy) for usage.
+
+### Diagnostic Tools
+`tools/compare_db_schema.py` is a developer utility for comparing database schemas.
+See [SCRIPTS_REFERENCE.md](docs/SCRIPTS_REFERENCE.md) for usage.
+
+### Running Scripts Standalone
+
+All relocated generators support standalone invocation via `python -m scripts.<name>`. This ensures the project root is on `sys.path`, allowing clean absolute imports (e.g., `import run`, `from util.resource_browser import ...`). For example:
+
+    $ python -m scripts.generate --output my.db --phobos-output ./raw
+    $ python -m scripts.generate_image_zip --eve "C:\CCP\EVE Frontier" --verbose
+    $ python -m scripts.extract_landscapes
+    $ python -m scripts.query_blueprints --search "gyrojet"
+
+> **Tip:** If you previously used `python generate.py` or `python generate_ship_csv.py`, switch to the `python -m scripts.<name>` pattern after the reorganization.
 
 ### Sample Queries
 

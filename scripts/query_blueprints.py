@@ -263,8 +263,36 @@ class BlueprintDB:
         return results
 
 
-def main():
-    """Command-line interface"""
+def main(data_dir='output', search=None, output=None, input=None, blueprint_id=None, exact=False, verbose=False, limit=None):
+    """Query EVE blueprint/schema data."""
+    db = BlueprintDB(data_dir)
+    
+    # Handle queries
+    if blueprint_id:
+        bp_data = db.get_blueprint(blueprint_id)
+        if bp_data:
+            enriched = db._enrich_blueprint(blueprint_id, bp_data)
+            db.print_blueprint(enriched, verbose)
+        else:
+            print(f"Blueprint ID {blueprint_id} not found")
+            return 1
+    
+    elif output:
+        db.search(output, search_type="output", exact=exact, verbose=verbose, limit=limit)
+    
+    elif input:
+        db.search(input, search_type="input", exact=exact, verbose=verbose, limit=limit)
+    
+    elif search:
+        db.search(search, search_type="all", exact=exact, verbose=verbose, limit=limit)
+    
+    else:
+        print(f"Database loaded: {len(db.blueprints)} blueprints, {len(db.types)} types")
+    
+    return 0
+
+
+if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
@@ -273,19 +301,19 @@ def main():
         epilog="""
 Examples:
   # Search for blueprints that produce ammo
-  python query_blueprints.py --output "ammo"
+  python -m scripts.query_blueprints --output "ammo"
   
   # Search for blueprints using iron
-  python query_blueprints.py --input "iron"
+  python -m scripts.query_blueprints --input "iron"
   
   # Search everywhere for "gyrojet"
-  python query_blueprints.py --search "gyrojet"
+  python -m scripts.query_blueprints --search "gyrojet"
   
   # Get specific blueprint by ID
-  python query_blueprints.py --id 1000
+  python -m scripts.query_blueprints --id 1000
   
   # Exact match only
-  python query_blueprints.py --output "Leap" --exact
+  python -m scripts.query_blueprints --output "Leap" --exact
         """
     )
     
@@ -307,36 +335,4 @@ Examples:
                        help='Limit number of results')
     
     args = parser.parse_args()
-    
-    # Initialize database
-    db = BlueprintDB(args.data_dir)
-    
-    # Handle queries
-    if args.id:
-        bp_data = db.get_blueprint(args.id)
-        if bp_data:
-            enriched = db._enrich_blueprint(args.id, bp_data)
-            db.print_blueprint(enriched, args.verbose)
-        else:
-            print(f"Blueprint ID {args.id} not found")
-            sys.exit(1)
-    
-    elif args.output:
-        db.search(args.output, search_type="output", exact=args.exact, 
-                 verbose=args.verbose, limit=args.limit)
-    
-    elif args.input:
-        db.search(args.input, search_type="input", exact=args.exact,
-                 verbose=args.verbose, limit=args.limit)
-    
-    elif args.search:
-        db.search(args.search, search_type="all", exact=args.exact,
-                 verbose=args.verbose, limit=args.limit)
-    
-    else:
-        parser.print_help()
-        print(f"\nDatabase loaded: {len(db.blueprints)} blueprints, {len(db.types)} types")
-
-
-if __name__ == "__main__":
-    main()
+    sys.exit(main(data_dir=args.data_dir, search=args.search, output=args.output, input=args.input, blueprint_id=args.id, exact=args.exact, verbose=args.verbose, limit=args.limit))

@@ -9,3 +9,5 @@ __pycache__
 .venv
 .pi/
 openspec/
+test_out*/
+

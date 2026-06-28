@@ -23,7 +23,7 @@ def load_types(output_path):
     """Load types data from output directory."""
     types_path = os.path.join(output_path, 'fsd_built', 'types.json')
     if not os.path.exists(types_path):
-        raise FileNotFoundError(f"types.json not found at {types_path}. Run 'python run.py' first to extract data.")
+        raise FileNotFoundError(f"types.json not found at {types_path}. Run 'python -m run' first to extract data.")
     
     print(f"Loading types from {types_path}...")
     with open(types_path, 'r', encoding='utf-8') as f:
@@ -36,7 +36,7 @@ def load_iconids(output_path):
     """Load icon ID mappings from output directory."""
     iconids_path = os.path.join(output_path, 'fsd_built', 'iconids.json')
     if not os.path.exists(iconids_path):
-        raise FileNotFoundError(f"iconids.json not found at {iconids_path}. Run 'python run.py' first to extract data.")
+        raise FileNotFoundError(f"iconids.json not found at {iconids_path}. Run 'python -m run' first to extract data.")
     
     print(f"Loading icon mappings from {iconids_path}...")
     with open(iconids_path, 'r', encoding='utf-8') as f:
@@ -50,7 +50,7 @@ def load_graphicids(output_path):
     graphicids_path = os.path.join(output_path, 'fsd_built', 'graphicids.json')
     if not os.path.exists(graphicids_path):
         raise FileNotFoundError(
-            f"graphicids.json not found at {graphicids_path}. Run 'python run.py' first to extract data.")
+            f"graphicids.json not found at {graphicids_path}. Run 'python -m run' first to extract data.")
 
     print(f"Loading graphic mappings from {graphicids_path}...")
     with open(graphicids_path, 'r', encoding='utf-8') as f:
@@ -194,23 +194,79 @@ def extract_icons_to_zip(type_candidates, resource_browser, output_zip_path, ver
     return successful, failed
 
 
-def main():
+def main(eve, output, server='stillness', verbose=False):
+    """Extract EVE item icons and package them into a zip file."""
+    zip_path = os.path.join(output, 'zip', 'item_icons.zip')
+    
+    # Validate EVE path
+    if not os.path.isdir(eve):
+        print(f"Error: EVE installation directory not found: {eve}", file=sys.stderr)
+        return 1
+    
+    # Validate output path
+    if not os.path.isdir(output):
+        print(f"Error: Output directory not found: {output}", file=sys.stderr)
+        print("Run 'python -m run' first to extract game data.", file=sys.stderr)
+        return 1
+    
+    try:
+        # Load data files
+        types_data = load_types(output)
+        iconids_data = load_iconids(output)
+        graphicids_data = load_graphicids(output)
+        
+        # Build type -> candidate icon paths
+        type_candidates = build_type_icon_candidates(types_data, iconids_data, graphicids_data)
+        
+        if not type_candidates:
+            print("Error: No valid type-to-icon mappings found", file=sys.stderr)
+            return 1
+        
+        # Initialize resource browser
+        print(f"Initializing resource browser for EVE path: {eve}")
+        resource_browser = ResourceBrowser(eve, server)
+        
+        # Extract icons to zip
+        successful, failed = extract_icons_to_zip(
+            type_candidates,
+            resource_browser,
+            zip_path,
+            verbose=verbose
+        )
+        
+        if successful == 0:
+            print("Error: No icons were successfully extracted", file=sys.stderr)
+            return 1
+        
+        print(f"\nSuccess! Zip file created: {zip_path}")
+        print(f"File size: {os.path.getsize(zip_path) / (1024 * 1024):.2f} MB")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        return 1
+
+
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Extract EVE item icons and package them into a zip file',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Extract icons from EVE Frontier (default)
-  python generate_image_zip.py --eve "C:\\CCP\\EVE Frontier"
+  python -m scripts.generate_image_zip --eve "C:\CCP\EVE Frontier"
   
   # Extract icons from EVE Online
-  python generate_image_zip.py --eve "C:\\CCP\\EVE Online" --server tq
+  python -m scripts.generate_image_zip --eve "C:\CCP\EVE Online" --server tq
   
   # Specify custom output directories
-  python generate_image_zip.py --eve "C:\\CCP\\EVE Frontier" --output output --zip icons.zip
+  python -m scripts.generate_image_zip --eve "C:\CCP\EVE Frontier" --output output --zip icons.zip
   
   # Enable verbose output
-  python generate_image_zip.py --eve "C:\\CCP\\EVE Frontier" --verbose
+  python -m scripts.generate_image_zip --eve "C:\CCP\EVE Frontier" --verbose
 """
     )
     
@@ -245,58 +301,4 @@ Examples:
     )
     
     args = parser.parse_args()
-    
-    # Validate EVE path
-    if not os.path.isdir(args.eve):
-        print(f"Error: EVE installation directory not found: {args.eve}", file=sys.stderr)
-        return 1
-    
-    # Validate output path
-    if not os.path.isdir(args.output):
-        print(f"Error: Output directory not found: {args.output}", file=sys.stderr)
-        print("Run 'python run.py' first to extract game data.", file=sys.stderr)
-        return 1
-    
-    try:
-        # Load data files
-        types_data = load_types(args.output)
-        iconids_data = load_iconids(args.output)
-        graphicids_data = load_graphicids(args.output)
-        
-        # Build type -> candidate icon paths
-        type_candidates = build_type_icon_candidates(types_data, iconids_data, graphicids_data)
-        
-        if not type_candidates:
-            print("Error: No valid type-to-icon mappings found", file=sys.stderr)
-            return 1
-        
-        # Initialize resource browser
-        print(f"Initializing resource browser for EVE path: {args.eve}")
-        resource_browser = ResourceBrowser(args.eve, args.server)
-        
-        # Extract icons to zip
-        successful, failed = extract_icons_to_zip(
-            type_candidates,
-            resource_browser,
-            args.zip,
-            verbose=args.verbose
-        )
-        
-        if successful == 0:
-            print("Error: No icons were successfully extracted", file=sys.stderr)
-            return 1
-        
-        print(f"\nSuccess! Zip file created: {args.zip}")
-        print(f"File size: {os.path.getsize(args.zip) / (1024 * 1024):.2f} MB")
-        
-        return 0
-        
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        return 1
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(args.eve, args.output, args.server, args.verbose))
