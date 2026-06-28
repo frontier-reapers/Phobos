@@ -194,9 +194,10 @@ def extract_icons_to_zip(type_candidates, resource_browser, output_zip_path, ver
     return successful, failed
 
 
-def main(eve, output, server='stillness', verbose=False):
+def main(eve, output, server='stillness', verbose=False, zip_path=None):
     """Extract EVE item icons and package them into a zip file."""
-    zip_path = os.path.join(output, 'zip', 'item_icons.zip')
+    if zip_path is None:
+        zip_path = os.path.join(output, 'zip', 'item_icons.zip')
     
     # Validate EVE path
     if not os.path.isdir(eve):
@@ -301,4 +302,4 @@ Examples:
     )
     
     args = parser.parse_args()
-    sys.exit(main(args.eve, args.output, args.server, args.verbose))
+    sys.exit(main(args.eve, args.output, args.server, args.verbose, args.zip))

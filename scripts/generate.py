@@ -1374,7 +1374,7 @@ def run_simple_query(db_path: str, query: str):
         print(f"Query error: {e}")
 
 
-def main(output='eve_universe.db', phobos_output='./output', query=None):
+def main(output='static_data.db', phobos_output='./output', query=None):
     """Main entry point."""
     # Verify Python version
     if sys.version_info < (3, 7):
@@ -1410,8 +1410,8 @@ def main(output='eve_universe.db', phobos_output='./output', query=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process Phobos EVE data into SQLite database')
     parser.add_argument('--output', '-o',
-                       default='eve_universe.db',
-                       help='Output SQLite database path (default: eve_universe.db)')
+                       default='static_data.db',
+                       help='Output SQLite database path (default: static_data.db)')
     parser.add_argument('--phobos-output', '-p',
                        default='./output',
                        help='Path to Phobos output directory (default: ./output)')

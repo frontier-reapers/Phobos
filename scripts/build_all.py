@@ -14,7 +14,7 @@ def _run_step(name, func):
     try:
         result = func()
         # Some steps return nonzero exit codes rather than raising
-        if isinstance(result, int) and result != 0:
+        if type(result) is int and result != 0:
             raise RuntimeError(f" exited with code {result}")
         if result is False:
             raise RuntimeError(" returned failure")
@@ -28,6 +28,23 @@ def run_pipeline(eve, output, server='stillness', translate='multi', list_filter
     os.makedirs(raw_dir, exist_ok=True)
     print(f"Output base: {output}")
     print(f"Raw data dir: {raw_dir}")
+
+    # Pre-flight: catch sync-conflict or other stale files left by external tools
+    conflict_files = []
+    for root, _dirs, files in os.walk(raw_dir):
+        for f in files:
+            if '.sync-conflict-' in f:
+                conflict_files.append(os.path.join(root, f))
+    if conflict_files:
+        print(f"\n[ERROR] Found {len(conflict_files)} sync-conflict file(s) in raw directory:")
+        for cf in conflict_files[:5]:
+            print(f"  {cf}")
+        if len(conflict_files) > 5:
+            print(f"  ... and {len(conflict_files) - 5} more")
+        print("\nThis usually means a sync tool (e.g. Syncthing) renamed files during extraction.")
+        print("Please delete the raw directory and re-run:")
+        print(f"  rmdir /s /q \"{raw_dir}\"")
+        raise RuntimeError("Stale sync-conflict files detected in raw directory")
 
     # 1. Upstream extraction
     import run
@@ -44,7 +61,7 @@ def run_pipeline(eve, output, server='stillness', translate='multi', list_filter
 
     # 2. Generate universe database
     from scripts import generate
-    db_path = os.path.join(output, 'eve_universe.db')
+    db_path = os.path.join(output, 'static_data.db')
     _run_step(
         'generate (universe DB)',
         lambda: generate.main(output=db_path, phobos_output=raw_dir, query=None),
@@ -60,9 +77,10 @@ def run_pipeline(eve, output, server='stillness', translate='multi', list_filter
 
     # 4. Extract item icons
     from scripts import generate_image_zip
+    zip_path = os.path.join(output, 'icons.zip')
     _run_step(
         'generate_image_zip (item icons)',
-        lambda: generate_image_zip.main(eve=eve, output=raw_dir, server=server, verbose=False),
+        lambda: generate_image_zip.main(eve=eve, output=raw_dir, server=server, verbose=False, zip_path=zip_path),
     )
 
     # 5. Extract landscapes

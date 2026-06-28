@@ -10,4 +10,5 @@ __pycache__
 .pi/
 openspec/
 test_out*/
+out/
 

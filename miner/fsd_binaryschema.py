@@ -192,7 +192,7 @@ class FsdBinaryMiner(BaseMiner):
             for item in (pre_fsd_data.items()):
                 #fsd_json.append(str("FSD_ENTRY: ") + str(item[0]))
 
-                print(item[0])
+                # print(item[0])  # DEBUG: can be very noisy for large FSD Multi Index containers
                 for items in item:
                     #print(items)
                     if type(items) == objectLoader.ObjectLoader:
