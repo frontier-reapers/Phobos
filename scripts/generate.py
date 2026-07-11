@@ -18,6 +18,11 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 
+# Sentinel constants for EVE static data
+UINT32_MAX = 4294967295  # UINT32_MAX sentinel (2^32 - 1)
+LIFE_SENTINEL = 715600031788302336  # "eternal" / undefined life sentinel
+
+
 def _parse_float(value):
     """Parse a float value from string, handling special cases."""
     if value is None:
@@ -34,6 +39,36 @@ def _parse_float(value):
         except ValueError:
             return None
     return None
+
+def _parse_solar_float(value):
+    """Parse a float value, returning None for the UINT32_MAX sentinel."""
+    result = _parse_float(value)
+    if result is not None and result == float(UINT32_MAX):
+        return None
+    return result
+
+
+def _parse_star_life(value):
+    """Parse star life as integer, returning None for UINT32_MAX, LIFE_SENTINEL, and 0."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        int_val = int(value)
+    elif isinstance(value, str):
+        # Non-numeric strings (e.g. "[PHONE]") → None
+        try:
+            int_val = int(value)
+        except ValueError:
+            try:
+                int_val = int(float(value))
+            except ValueError:
+                return None
+    else:
+        return None
+    if int_val == UINT32_MAX or int_val == LIFE_SENTINEL or int_val == 0:
+        return None
+    return int_val
+
 
 def _parse_int(value):
     """Parse an integer value from string or number."""
@@ -153,6 +188,23 @@ def create_database_schema(conn: sqlite3.Connection) -> None:
             star_radius REAL,
             star_spectral_class TEXT,
             star_temperature REAL,
+            al26_dose_bucket TEXT,
+            cosmic_ray_exposure REAL,
+            remnant_dust_mass REAL,
+            remnant_gas_mass REAL,
+            migration_category TEXT,
+            potential REAL,
+            star_activity_cycle_phase REAL,
+            star_c_to_o_ratio REAL,
+            star_differential_rotation REAL,
+            star_fe_to_mg_ratio REAL,
+            star_galaxy_component TEXT,
+            star_magnetic_complexity REAL,
+            star_magnetic_field_strength REAL,
+            star_population TEXT,
+            star_rotation_period_days REAL,
+            star_source_galaxy INTEGER,
+            star_space_weathering_rate REAL,
             FOREIGN KEY (constellationId) REFERENCES Constellations (constellationId),
             FOREIGN KEY (regionId) REFERENCES Regions (regionId)
         )
@@ -778,9 +830,10 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
     conn.commit()
     print(f"Inserted {constellation_count} constellations")
     
-    # Load star statistics first (before inserting systems)
-    print("Loading star statistics...")
+    # Load star statistics and system extras first (before inserting systems)
+    print("Loading star statistics and system extras...")
     star_statistics = {}
+    system_extras = {}
     systems_content_path = phobos_path / 'fsd_binary_schema' / 'solarsystemcontent.json'
     if systems_content_path.exists():
         with open(systems_content_path, 'r', encoding='utf-8') as f:
@@ -808,16 +861,40 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                     statistics = star_data.get('statistics', {})
                     if isinstance(statistics, dict) and statistics:
                         star_statistics[system_id] = {
+                            # Existing 7 star statistics
                             'age': statistics.get('age'),
                             'mass': statistics.get('mass'),
                             'metallicity': statistics.get('metallicity'),
                             'radius': statistics.get('radius'),
                             'spectralClass': statistics.get('spectralClass'),
                             'temperature': statistics.get('temperature'),
-                            'luminosity': statistics.get('luminosity')
+                            'luminosity': statistics.get('luminosity'),
+                            # New 11 star statistics
+                            'activityCyclePhase': statistics.get('activityCyclePhase'),
+                            'cToORatio': statistics.get('cToORatio'),
+                            'differentialRotation': statistics.get('differentialRotation'),
+                            'feToMgRatio': statistics.get('feToMgRatio'),
+                            'galaxyComponent': statistics.get('galaxyComponent'),
+                            'magneticComplexity': statistics.get('magneticComplexity'),
+                            'magneticFieldStrength': statistics.get('magneticFieldStrength'),
+                            'population': statistics.get('population'),
+                            'rotationPeriodDays': statistics.get('rotationPeriodDays'),
+                            'sourceGalaxy': statistics.get('sourceGalaxy'),
+                            'spaceWeatheringRate': statistics.get('spaceWeatheringRate'),
                         }
+                
+                # Extract system-level extras (9 top-level fields)
+                system_extras[system_id] = {
+                    'al26DoseBucket': system_data.get('al26DoseBucket'),
+                    'cosmicRayExposure': system_data.get('cosmicRayExposure'),
+                    'remnantDustMass': system_data.get('remnantDustMass'),
+                    'remnantGasMass': system_data.get('remnantGasMass'),
+                    'migrationCategory': system_data.get('migrationCategory'),
+                    'potential': system_data.get('potential'),
+                }
         
         print(f"Loaded star statistics for {len(star_statistics)} systems")
+        print(f"Loaded system extras for {len(system_extras)} systems")
     
     # Load systems
     print("Loading systems...")
@@ -903,13 +980,54 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                 star_spectral_class = star_stats.get('spectralClass')
                 star_temperature = _parse_float(star_stats.get('temperature'))
                 
+                # Get new star statistics
+                star_activity_cycle_phase = _parse_solar_float(star_stats.get('activityCyclePhase'))
+                star_c_to_o_ratio = _parse_solar_float(star_stats.get('cToORatio'))
+                star_differential_rotation = _parse_solar_float(star_stats.get('differentialRotation'))
+                star_fe_to_mg_ratio = _parse_solar_float(star_stats.get('feToMgRatio'))
+                star_galaxy_component = star_stats.get('galaxyComponent')
+                star_magnetic_complexity = _parse_solar_float(star_stats.get('magneticComplexity'))
+                star_magnetic_field_strength = _parse_solar_float(star_stats.get('magneticFieldStrength'))
+                star_population = star_stats.get('population')
+                star_rotation_period_days = _parse_solar_float(star_stats.get('rotationPeriodDays'))
+                star_source_galaxy = _parse_int(star_stats.get('sourceGalaxy'))
+                star_space_weathering_rate = _parse_solar_float(star_stats.get('spaceWeatheringRate'))
+                
+                # Get system extras
+                extras = system_extras.get(system_id, {})
+                al26_dose_bucket = extras.get('al26DoseBucket')
+                if al26_dose_bucket is not None and isinstance(al26_dose_bucket, str):
+                    al26_dose_bucket = al26_dose_bucket if al26_dose_bucket in ('none', 'low', 'medium', 'high') else None
+                cosmic_ray_exposure = _parse_solar_float(extras.get('cosmicRayExposure'))
+                remnant_dust_mass = _parse_solar_float(extras.get('remnantDustMass'))
+                remnant_gas_mass = _parse_solar_float(extras.get('remnantGasMass'))
+                migration_category = extras.get('migrationCategory')
+                if migration_category is not None and isinstance(migration_category, str):
+                    migration_category = migration_category if migration_category in ('no_giants', 'warm_giant', 'hot_jupiter', 'cold_giant') else None
+                potential = _parse_solar_float(extras.get('potential'))
+                
                 cursor.execute('''
                     INSERT OR IGNORE INTO SolarSystems (solarSystemId, name, constellationId, regionId, centerX, centerY, centerZ,
                                              frost_line, habitable_zone_inner, habitable_zone_outer, star_age, star_luminosity, star_mass, 
-                                             star_metallicity, star_radius, star_spectral_class, star_temperature) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             star_metallicity, star_radius, star_spectral_class, star_temperature,
+                                             al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                                             migration_category, potential,
+                                             star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                                             star_fe_to_mg_ratio, star_galaxy_component,
+                                             star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                                             star_rotation_period_days, star_source_galaxy, star_space_weathering_rate) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?)
                 ''', (system_id, system_name, constellation_id, region_id, x, y, z,
-                      frost_line, habitable_zone_inner, habitable_zone_outer, star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature))
+                      frost_line, habitable_zone_inner, habitable_zone_outer, star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature,
+                      al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                      migration_category, potential,
+                      star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                      star_fe_to_mg_ratio, star_galaxy_component,
+                      star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                      star_rotation_period_days, star_source_galaxy, star_space_weathering_rate))
                 system_count += 1
             except (ValueError, KeyError):
                 continue
@@ -997,12 +1115,53 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                         star_spectral_class = star_stats.get('spectralClass')
                         star_temperature = _parse_float(star_stats.get('temperature'))
                         
+                        # Get new star statistics
+                        star_activity_cycle_phase = _parse_solar_float(star_stats.get('activityCyclePhase'))
+                        star_c_to_o_ratio = _parse_solar_float(star_stats.get('cToORatio'))
+                        star_differential_rotation = _parse_solar_float(star_stats.get('differentialRotation'))
+                        star_fe_to_mg_ratio = _parse_solar_float(star_stats.get('feToMgRatio'))
+                        star_galaxy_component = star_stats.get('galaxyComponent')
+                        star_magnetic_complexity = _parse_solar_float(star_stats.get('magneticComplexity'))
+                        star_magnetic_field_strength = _parse_solar_float(star_stats.get('magneticFieldStrength'))
+                        star_population = star_stats.get('population')
+                        star_rotation_period_days = _parse_solar_float(star_stats.get('rotationPeriodDays'))
+                        star_source_galaxy = _parse_int(star_stats.get('sourceGalaxy'))
+                        star_space_weathering_rate = _parse_solar_float(star_stats.get('spaceWeatheringRate'))
+                        
+                        # Get system extras
+                        extras = system_extras.get(system_id, {})
+                        al26_dose_bucket = extras.get('al26DoseBucket')
+                        if al26_dose_bucket is not None and isinstance(al26_dose_bucket, str):
+                            al26_dose_bucket = al26_dose_bucket if al26_dose_bucket in ('none', 'low', 'medium', 'high') else None
+                        cosmic_ray_exposure = _parse_solar_float(extras.get('cosmicRayExposure'))
+                        remnant_dust_mass = _parse_solar_float(extras.get('remnantDustMass'))
+                        remnant_gas_mass = _parse_solar_float(extras.get('remnantGasMass'))
+                        migration_category = extras.get('migrationCategory')
+                        if migration_category is not None and isinstance(migration_category, str):
+                            migration_category = migration_category if migration_category in ('no_giants', 'warm_giant', 'hot_jupiter', 'cold_giant') else None
+                        potential = _parse_solar_float(extras.get('potential'))
+                        
                         cursor.execute('''
                             INSERT OR IGNORE INTO SolarSystems (solarSystemId, name, constellationId, regionId, centerX, centerY, centerZ, frost_line, habitable_zone_inner, habitable_zone_outer,
-                                               star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                               star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature,
+                                               al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                                               migration_category, potential,
+                                               star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                                               star_fe_to_mg_ratio, star_galaxy_component,
+                                               star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                                               star_rotation_period_days, star_source_galaxy, star_space_weathering_rate) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?, ?)
                         ''', (system_id, system_name, constellation_id, region_id, x, y, z, frost_line, habitable_zone_inner, habitable_zone_outer,
-                              star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature))
+                              star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature,
+                              al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                              migration_category, potential,
+                              star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                              star_fe_to_mg_ratio, star_galaxy_component,
+                              star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                              star_rotation_period_days, star_source_galaxy, star_space_weathering_rate))
                         system_count += 1
                     elif isinstance(system_entries, str):
                         # String entries might just be system IDs, we still need the data
@@ -1025,12 +1184,53 @@ def process_eve_data(phobos_output_dir: str, db_path: str) -> None:
                         star_spectral_class = star_stats.get('spectralClass')
                         star_temperature = _parse_float(star_stats.get('temperature'))
                         
+                        # Get new star statistics
+                        star_activity_cycle_phase = _parse_solar_float(star_stats.get('activityCyclePhase'))
+                        star_c_to_o_ratio = _parse_solar_float(star_stats.get('cToORatio'))
+                        star_differential_rotation = _parse_solar_float(star_stats.get('differentialRotation'))
+                        star_fe_to_mg_ratio = _parse_solar_float(star_stats.get('feToMgRatio'))
+                        star_galaxy_component = star_stats.get('galaxyComponent')
+                        star_magnetic_complexity = _parse_solar_float(star_stats.get('magneticComplexity'))
+                        star_magnetic_field_strength = _parse_solar_float(star_stats.get('magneticFieldStrength'))
+                        star_population = star_stats.get('population')
+                        star_rotation_period_days = _parse_solar_float(star_stats.get('rotationPeriodDays'))
+                        star_source_galaxy = _parse_int(star_stats.get('sourceGalaxy'))
+                        star_space_weathering_rate = _parse_solar_float(star_stats.get('spaceWeatheringRate'))
+                        
+                        # Get system extras
+                        extras = system_extras.get(system_id, {})
+                        al26_dose_bucket = extras.get('al26DoseBucket')
+                        if al26_dose_bucket is not None and isinstance(al26_dose_bucket, str):
+                            al26_dose_bucket = al26_dose_bucket if al26_dose_bucket in ('none', 'low', 'medium', 'high') else None
+                        cosmic_ray_exposure = _parse_solar_float(extras.get('cosmicRayExposure'))
+                        remnant_dust_mass = _parse_solar_float(extras.get('remnantDustMass'))
+                        remnant_gas_mass = _parse_solar_float(extras.get('remnantGasMass'))
+                        migration_category = extras.get('migrationCategory')
+                        if migration_category is not None and isinstance(migration_category, str):
+                            migration_category = migration_category if migration_category in ('no_giants', 'warm_giant', 'hot_jupiter', 'cold_giant') else None
+                        potential = _parse_solar_float(extras.get('potential'))
+                        
                         cursor.execute('''
                             INSERT OR IGNORE INTO SolarSystems (solarSystemId, name, constellationId, regionId, centerX, centerY, centerZ, frost_line, habitable_zone_inner, habitable_zone_outer,
-                                               star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                               star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature,
+                                               al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                                               migration_category, potential,
+                                               star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                                               star_fe_to_mg_ratio, star_galaxy_component,
+                                               star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                                               star_rotation_period_days, star_source_galaxy, star_space_weathering_rate) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?, ?, ?)
                         ''', (system_id, system_name, None, None, None, None, None, None, None, None,
-                              star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature))
+                              star_age, star_luminosity, star_mass, star_metallicity, star_radius, star_spectral_class, star_temperature,
+                              al26_dose_bucket, cosmic_ray_exposure, remnant_dust_mass, remnant_gas_mass,
+                              migration_category, potential,
+                              star_activity_cycle_phase, star_c_to_o_ratio, star_differential_rotation,
+                              star_fe_to_mg_ratio, star_galaxy_component,
+                              star_magnetic_complexity, star_magnetic_field_strength, star_population,
+                              star_rotation_period_days, star_source_galaxy, star_space_weathering_rate))
                         system_count += 1
                 except ValueError:
                     continue
